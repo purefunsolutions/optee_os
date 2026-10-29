@@ -1,0 +1,61 @@
+#!/usr/bin/expect -f
+#
+# build.git's qemu-riscv64-check.exp, but runs all of xtest instead of
+# stopping at the first failing case, for a baseline of what passes.
+# $timeout is how long the guest may stay silent, not the whole run.
+
+set quiet 0
+set xtest_args ""
+set tests "xtest"
+
+set timeout 900
+set basedir [file dirname $argv0]
+source $basedir/qemu-check-common.exp
+parse_common_args
+
+if {$tests != "xtest" && $tests != "all"} {
+	fail_with_message "Unsupported test set '$tests' for qemu_riscv64 check" 3
+}
+
+set cmd "xtest $xtest_args"
+
+log_user 0
+log_file -a -noappend "serial0.log"
+close [open "serial1.log" "w+"]
+
+info "Starting QEMU..."
+spawn sh -c "$::env(QEMU) $::env(QEMU_CHECK_ARGS)"
+
+expect {
+	"Kernel panic" {
+		fail_with_message "!!! Kernel panic" 1
+	}
+	timeout {
+		fail_with_message "!!! Timeout while booting" 1
+	}
+	"ogin:"
+}
+
+send -- "root\r\r"
+expect "# "
+info " done, guest is booted.\n"
+
+info "Running: $cmd...\n"
+send -- "$cmd\r"
+expect {
+	"TEE test application done!" {
+		info "xtest finished.\n"
+	}
+	"Kernel panic" {
+		fail_with_message "!!! Kernel panic" 1
+	}
+	-re {[^\r\n]*[\r\n]+} {
+		exp_continue
+	}
+	timeout {
+		fail_with_message "!!! Timeout: no output for $timeout s" 1
+	}
+	eof {
+		fail_with_message "!!! QEMU exited" 1
+	}
+}
