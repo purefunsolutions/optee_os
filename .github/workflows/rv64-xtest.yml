@@ -1,0 +1,116 @@
+# xtest on QEMU RISC-V64 (virt), for a baseline of what passes: the
+# qemu_riscv64 jobs of OP-TEE/optee_os#7927, but with all of xtest run
+# (.github/ci/qemu-riscv64-xtest-all.exp) instead of stopping at the
+# first failing case. The rest of the setup is the OP-TEE/manifest
+# qemu_riscv64.xml: build.git, optee_test and optee_client from OP-TEE,
+# Linux, OpenSBI and U-Boot from RISE. This branch's optee_os replaces
+# the manifest's.
+#
+# Only pushes to ci/** in this repository start it, or a manual run.
+name: RISC-V64 xtest
+on:
+  push:
+    branches:
+      - 'ci/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rv64-xtest-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  image:
+    name: Build QEMU RISC-V64 image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Dockerfile
+        run: |
+          cat > Dockerfile <<'EOT'
+          FROM jforissier/optee_os_ci:qemu_check
+          RUN /root/get_optee.sh qemu_riscv64 /root/optee_repo_qemu_riscv64
+          EOT
+      - name: Build Docker image
+        run: |
+          docker build -t qemuriscv64_image .
+          docker save qemuriscv64_image | zstd -T0 -o qemuriscv64_image.tar.zst
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemuriscv64_image
+          path: qemuriscv64_image.tar.zst
+          retention-days: 3
+  xtest:
+    name: xtest
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Download Docker image
+        uses: actions/download-artifact@v8
+        with:
+          name: qemuriscv64_image
+          path: .
+      - name: Load Docker image
+        run: |
+          zstd -d qemuriscv64_image.tar.zst -c | docker load
+          rm qemuriscv64_image.tar.zst
+      - name: Build, boot and run xtest
+        run: |
+          mkdir -p ci-logs
+          docker run --rm \
+            -v ${{ github.workspace }}:/runner/optee_os \
+            -w /root \
+            qemuriscv64_image \
+            bash -c '
+              set -e -v
+              git config --global --add safe.directory "*"
+              export FORCE_UNSAFE_CONFIGURE=1
+              export CFG_TEE_CORE_LOG_LEVEL=2
+              TOP=/root/optee_repo_qemu_riscv64
+              mv $TOP/optee_os $TOP/optee_os_old
+              ln -s /runner/optee_os $TOP/optee_os
+              cp /runner/optee_os/.github/ci/qemu-riscv64-xtest-all.exp \
+                $TOP/build/qemu-riscv64-check.exp
+              cd $TOP/build
+              status=0
+              make -j$(nproc) check || status=$?
+              cp $TOP/out/bin/serial*.log /runner/optee_os/ci-logs/ || true
+              echo "make check exit: $status" > /runner/optee_os/ci-logs/status
+              exit $status
+            '
+      - name: Summary
+        if: always()
+        run: |
+          log=ci-logs/serial0.log
+          {
+            echo "## xtest on QEMU RISC-V64: ${GITHUB_REF_NAME}"
+            echo
+            echo "optee_os under test: \`$(git log -1 --format='%h %s' HEAD~1)\`"
+            echo
+            [ -f ci-logs/status ] && echo "$(cat ci-logs/status)" && echo
+            if [ -f "$log" ]; then
+              tr -d '\r' < "$log" > ci-logs/serial0.txt
+              echo '```'
+              grep -a -E 'OP-TEE version|optee: revision|subtests of which|test cases of which|test cases were skipped|TEE test application done|!!!' ci-logs/serial0.txt || true
+              echo '```'
+              echo "Failed cases:"
+              echo '```'
+              grep -a -E '^ +[^ ]+ FAIL$' ci-logs/serial0.txt || echo none
+              echo '```'
+            else
+              echo "No serial log: the build did not get as far as booting."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -q 'TEE test application done' ci-logs/serial0.txt
+          ! grep -a -q -E '^ +[^ ]+ FAIL$' ci-logs/serial0.txt
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xtest-logs
+          path: ci-logs/
+          retention-days: 30
