@@ -82,6 +82,9 @@
 	.macro __clear_freg reg
 #if RISCV_FLEN_BITS == 32
 		fmv.w.x	f\reg, zero
+#elif __riscv_xlen == 32
+		/* RV32 has no fmv.d.x: +0.0 is all zeroes too */
+		fcvt.d.w f\reg, zero
 #else
 		fmv.d.x	f\reg, zero
 #endif
