@@ -107,14 +107,14 @@ jobs:
               echo '```'
               echo "Failed cases:"
               echo '```'
-              grep -a -E '^ +[^ ]+ FAIL$' ci-logs/serial0.txt || echo none
+              grep -a -E '^[a-z0-9_.]+ FAILED$' ci-logs/serial0.txt || echo none
               echo '```'
             else
               echo "No serial log: the build did not get as far as booting."
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
           grep -q 'TEE test application done' ci-logs/serial0.txt
-          ! grep -a -q -E '^ +[^ ]+ FAIL$' ci-logs/serial0.txt
+          ! grep -a -q -E '^[a-z0-9_.]+ FAILED$' ci-logs/serial0.txt
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v7
