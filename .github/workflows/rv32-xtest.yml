@@ -48,7 +48,7 @@ jobs:
         with:
           name: qemuriscv32_image
           path: qemuriscv32_image.tar.zst
-          retention-days: 3
+          retention-days: 1
   xtest:
     name: xtest
     needs: image
