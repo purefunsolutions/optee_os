@@ -103,7 +103,7 @@ jobs:
             if [ -f "$log" ]; then
               tr -d '\r' < "$log" > ci-logs/serial0.txt
               echo '```'
-              grep -a -E 'OP-TEE version|optee: revision|subtests of which|test cases of which|test cases were skipped|TEE test application done|!!!' ci-logs/serial0.txt || true
+              grep -a -E 'OP-TEE version|optee: revision|subtests of which|test cases of which|test cases were skipped|TEE test application done|data-abort|Panic|!!!' ci-logs/serial0.txt || true
               echo '```'
               echo "Failed cases:"
               echo '```'
